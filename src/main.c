@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "tarsau.h" 
 
 int main(int argc, char *argv[]) {
-    // Argüman sayısı kontrolü
     if (argc < 2) {
         printf("Kullanim: \n");
         printf("Arsivleme: ./tarsau -b dosya1 dosya2 -o arsiv.sau\n");
@@ -13,17 +13,15 @@ int main(int argc, char *argv[]) {
 
     // ARŞİVLEME MODU (-b)
     if (strcmp(argv[1], "-b") == 0) {
-        printf("--- Arsivleme Modu Baslatildi ---\n");
-        
-        char *output_file = "a.sau"; // Varsayılan arşiv adı
+        char *output_file = "a.sau"; // Arşiv dosya adı belirtilmezse varsayılan a.sau
         int file_count = 0;
-        char *input_files[32]; // En fazla 32 dosya sınırı
+        char *input_files[32]; // Giriş dosyası sayısı en fazla 32 olabilir
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0) {
                 if (i + 1 < argc) {
                     output_file = argv[i + 1];
-                    i++; // -o parametresinden sonraki dosya adını atla
+                    i++; 
                 }
             } else {
                 if (file_count < 32) {
@@ -36,13 +34,13 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        printf("Hedef Arsiv Dosyasi: %s\n", output_file);
-        printf("Arsivlenecek Dosyalar (%d adet):\n", file_count);
-        for (int i = 0; i < file_count; i++) {
-            printf(" -> %s\n", input_files[i]);
+        if (file_count == 0) {
+            printf("Hata: Arsivlenecek hic dosya belirtilmedi.\n");
+            return 1;
         }
-        
-        // TODO: Dosyaların boyut ve metin (ASCII) formatı kontrolleri buraya eklenecek.
+
+        // Modüler arşivleme fonksiyonumuzu çağırıyoruz
+        return archive_files(input_files, file_count, output_file);
 
     } 
     // ARŞİVDEN ÇIKARMA MODU (-a)
@@ -55,7 +53,7 @@ int main(int argc, char *argv[]) {
         }
 
         char *archive_file = argv[2];
-        char *target_dir = "."; // İkinci parametre verilmezse geçerli dizin (nokta)
+        char *target_dir = "."; 
 
         if (argc == 4) {
             target_dir = argv[3];
@@ -64,7 +62,7 @@ int main(int argc, char *argv[]) {
         printf("Acilacak Arsiv Dosyasi: %s\n", archive_file);
         printf("Hedef Dizin: %s\n", target_dir);
         
-        // TODO: Arşiv dosyası bütünlük kontrolü ve çıkarma işlemleri buraya eklenecek.
+        // TODO: Çıkarma modülünü buraya ekleyeceğiz.
 
     } 
     else {
