@@ -1,0 +1,257 @@
+#include "tarsau.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h> // chdir, mkdir ve erişim fonksiyonları için
+
+// Giriş dosyalarının toplam boyutu 200 MB'ı geçemez
+#define MAX_TOTAL_SIZE (200 * 1024 * 1024) 
+
+// 1. ALT FONKSİYON: ASCII Kontrolü
+bool is_ascii_file(const char *filename) {
+    FILE *file = fopen(filename, "rb");
+    if (!file) return false;
+
+    int ch;
+    while ((ch = fgetc(file)) != EOF) {
+        // Giriş dosyaları yalnızca metin dosyaları olabilir (ASCII, karakter başına 1 bayt)
+        // Standart metin dosyalarında Null-Byte (0) bulunmaz, 127'den büyük karakterler de ASCII dışıdır.
+        if (ch > 127 || ch == 0) { 
+            fclose(file);
+            return false;
+        }
+    }
+    fclose(file);
+    return true;
+}
+
+// 2. ALT FONKSİYON: Organizasyon (İçerik) Bölümünü Hazırlama
+static int prepare_organization_section(char *input_files[], int file_count, char *header_buffer, size_t *total_header_size) {
+    long total_files_size = 0;
+    struct stat st;
+    // 32 dosya için taşmayı önleyecek geniş buffer
+    char records_buffer[65536] = ""; 
+
+    for (int i = 0; i < file_count; i++) {
+        if (stat(input_files[i], &st) != 0) {
+            printf("Hata: %s dosyasinin bilgileri okunamadi.\n", input_files[i]);
+            return 1;
+        }
+
+        // Hatalı formatta bir giriş dosyası verildiğinde hata mesajı yazılmalı ve sorunsuz çıkılmalı
+        if (!S_ISREG(st.st_mode) || !is_ascii_file(input_files[i])) {
+            printf("%s giriş dosyasının formatı uyumsuzdur!\n", input_files[i]);
+            return -1; // -1: main'in veya arşiv fonksiyonunun sorunsuz çıkması için flag
+        }
+
+        total_files_size += st.st_size;
+        if (total_files_size > MAX_TOTAL_SIZE) {
+            printf("Hata: Giriş dosyalarının toplam boyutu 200 MB'ı geçemez.\n");
+            return 1;
+        }
+
+        // Sadece temel izin bitlerini alıyoruz (örn: 644, 755)
+        unsigned int perms = st.st_mode & 0777;
+        char record[1024];
+        
+        // Dökümandaki gibi: Alanlar virgülle ayrılır, sonraki her kayıt '|' ile ayrılır
+        // Format: Dosya adı,izinler,boyut|
+        snprintf(record, sizeof(record), "%s,%o,%ld|", input_files[i], perms, (long)st.st_size);
+        strcat(records_buffer, record);
+    }
+
+    size_t records_len = strlen(records_buffer);
+    // İlk 10 bayt + kayıtların boyutu organizasyon bölümünü oluşturur
+    *total_header_size = 10 + records_len; 
+
+    // İlk 10 bayt, ilk bölümün ASCII formatındaki sayısal boyutunu içerir
+    // Sola dayalı (%-10zu) yazarak tam 10 bayt kaplamasını sağlıyoruz
+    snprintf(header_buffer, 11, "%-10zu", *total_header_size);
+    strcat(header_buffer, records_buffer);
+
+    return 0;
+}
+
+// 3. ALT FONKSİYON: Arşivlenmiş Dosyaları Fiziksel Olarak Yazma
+static int append_files_to_archive(char *input_files[], int file_count, FILE *out) {
+    for (int i = 0; i < file_count; i++) {
+        FILE *in = fopen(input_files[i], "rb");
+        if (!in) {
+            printf("Hata: %s dosyasi okunamadi.\n", input_files[i]);
+            return 1;
+        }
+
+        char buffer[4096];
+        size_t bytes_read;
+        
+        // Arşivlenmiş dosyalar, herhangi bir ayırıcı kullanılmadan art arda yerleştirilir
+        while ((bytes_read = fread(buffer, 1, sizeof(buffer), in)) > 0) {
+            fwrite(buffer, 1, bytes_read, out);
+        }
+        fclose(in);
+    }
+    return 0;
+}
+
+// ANA ORKESTRATÖR FONKSİYON (-b modunun çağıracağı yer)
+int archive_files(char *input_files[], int file_count, const char *output_file) {
+    // Genişletilmiş statik buffer (taşmaları önlemek için)
+    char header_buffer[65536] = ""; 
+    size_t total_header_size = 0;
+
+    // Meta verileri topla ve doğrulamaları yap
+    int prep_status = prepare_organization_section(input_files, file_count, header_buffer, &total_header_size);
+    if (prep_status == -1) {
+        // Hatalı formatta sorunsuz bir şekilde programdan çıkılmalıdır
+        return 0; 
+    } else if (prep_status != 0) {
+        return 1; 
+    }
+
+    FILE *out = fopen(output_file, "wb");
+    if (!out) {
+        printf("Hata: Hedef arsiv dosyasi olusturulamadi.\n");
+        return 1;
+    }
+
+    // 1) Organizasyon (içerik) bilgilerini yaz
+    fwrite(header_buffer, 1, total_header_size, out);
+
+    // 2) Arşivlenmiş dosyaları ekle
+    if (append_files_to_archive(input_files, file_count, out) != 0) {
+        fclose(out);
+        return 1;
+    }
+
+    fclose(out);
+    // Dökümandaki örnek çıktı formatı
+    printf("Dosyalar birleştirildi.\n");
+    return 0;
+}
+
+// ÇIKARMA (-a) ORKESTRATÖR FONKSİYONU
+int extract_archive(const char *archive_name, const char *target_dir) {
+    FILE *sau_file = fopen(archive_name, "rb");
+    if (!sau_file) {
+        // Uygun olmayan bir dosya adı girildiğinde veya açılamadığında
+        printf("Arşiv dosyası uygunsuz veya bozuk!\n");
+        return 0; // Sorunsuz çıkış
+    }
+
+    // 1. Organizasyon Bölümünün Boyutunu Okuma (İlk 10 Bayt)
+    char header_size_str[11] = {0};
+    if (fread(header_size_str, 1, 10, sau_file) != 10) {
+        printf("Arşiv dosyası uygunsuz veya bozuk!\n");
+        fclose(sau_file);
+        return 0;
+    }
+
+    // ASCII formatındaki sayısal boyutu integer'a çevir
+    size_t header_size = (size_t)atol(header_size_str);
+    if (header_size <= 10) {
+        printf("Arşiv dosyası uygunsuz veya bozuk!\n");
+        fclose(sau_file);
+        return 0;
+    }
+
+    // 2. Organizasyon (İçerik) Bilgilerini Tampona Alma
+    size_t records_size = header_size - 10;
+    char *header_buffer = (char *)malloc(records_size + 1);
+    if (!header_buffer) {
+        printf("Hata: Bellek tahsis edilemedi.\n");
+        fclose(sau_file);
+        return 1;
+    }
+
+    if (fread(header_buffer, 1, records_size, sau_file) != records_size) {
+        printf("Arşiv dosyası uygunsuz veya bozuk!\n");
+        free(header_buffer);
+        fclose(sau_file);
+        return 0;
+    }
+    header_buffer[records_size] = '\0'; 
+
+    // 3. Hedef Dizin İşlemleri
+    // -a parametresinden sonraki ikinci parametre dizin adı parametresidir.
+    if (target_dir != NULL) {
+        struct stat st = {0};
+        // Girilen dizin adında boş yer yoksa (klasör mevcut değilse), önce dizin oluşturulur
+        if (stat(target_dir, &st) == -1) {
+            if (mkdir(target_dir, 0777) != 0) {
+                printf("Hata: %s dizini oluşturulamadı.\n", target_dir);
+                free(header_buffer);
+                fclose(sau_file);
+                return 1;
+            }
+        }
+        
+        // ...ardından dosyalar bu dizine yerleştirilir
+        if (chdir(target_dir) != 0) {
+            printf("Hata: %s dizinine erişilemedi.\n", target_dir);
+            free(header_buffer);
+            fclose(sau_file);
+            return 1;
+        }
+    }
+
+    // 4. Arşivlenmiş Dosyaları Ayrıştırma ve Oluşturma
+    char *saveptr;
+    // Sonraki her kayıt '|' ile ayrılır
+    char *token = strtok_r(header_buffer, "|", &saveptr);
+    
+    char extracted_files_list[4096] = "";
+    int file_count = 0;
+
+    while (token != NULL) {
+        char file_name[256] = {0};
+        unsigned int perms = 0;
+        long file_size = 0;
+
+        // Kayıttaki alanlar virgülle ayrılmıştır ve şunlardır: |Dosya adı, izinler, boyut|
+        if (sscanf(token, "%255[^,],%o,%ld", file_name, &perms, &file_size) == 3) {
+            FILE *out_file = fopen(file_name, "wb");
+            if (!out_file) {
+                printf("Hata: %s dosyası açılamadı.\n", file_name);
+            } else {
+                // Arşivlenmiş dosyalar, herhangi bir ayırıcı kullanılmadan art arda yerleştirilir
+                char data_buffer[4096];
+                long bytes_left = file_size;
+
+                while (bytes_left > 0) {
+                    size_t chunk = (bytes_left > (long)sizeof(data_buffer)) ? sizeof(data_buffer) : (size_t)bytes_left;
+                    size_t read_bytes = fread(data_buffer, 1, chunk, sau_file);
+                    if (read_bytes == 0) break; 
+                    
+                    fwrite(data_buffer, 1, read_bytes, out_file);
+                    bytes_left -= read_bytes;
+                }
+                fclose(out_file);
+
+                // Açılan dosyaların, açıldıkları zamankiyle aynı izinlere sahip olması gerekir
+                chmod(file_name, perms);
+
+                if (file_count > 0) {
+                    strcat(extracted_files_list, ", ");
+                }
+                strcat(extracted_files_list, file_name);
+                file_count++;
+            }
+        }
+        
+        token = strtok_r(NULL, "|", &saveptr);
+    }
+
+    free(header_buffer);
+    fclose(sau_file);
+
+    if (target_dir != NULL) {
+        chdir("..");
+    }
+
+    const char *dir_print_name = (target_dir != NULL) ? target_dir : ".";
+    // Dökümandaki çıktı formatı: d1 dizininde t1, t2, t3, t4.txt ve t5.dat dosyaları açıldı.
+    printf("%s dizininde %s dosyaları açıldı.\n", dir_print_name, extracted_files_list);
+
+    return 0; 
+}
