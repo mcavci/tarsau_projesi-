@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
                     input_files[file_count] = argv[i];
                     file_count++;
                 } else {
-                    printf("Hata: Giris dosyasi sayisi en fazla 32 olabilir!\n");
+                    printf("Hata: Arşivlenebilecek maksimum dosya sayısı 32'dir.\n");
                     return 1;
                 }
             }
@@ -45,24 +45,22 @@ int main(int argc, char *argv[]) {
     } 
     // ARŞİVDEN ÇIKARMA MODU (-a)
     else if (strcmp(argv[1], "-a") == 0) {
-        printf("--- Arsivden Cikarma Modu Baslatildi ---\n");
         
         if (argc < 3 || argc > 4) {
-            printf("Hata: -a parametresinden sonra en fazla 2 parametre almalidir.\n");
-            return 1;
+            printf("Arşiv dosyası uygunsuz veya bozuk!\n");
+            return 0; 
         }
 
         char *archive_file = argv[2];
-        char *target_dir = "."; 
+        char *target_dir = NULL; 
+
 
         if (argc == 4) {
             target_dir = argv[3];
         }
 
-        printf("Acilacak Arsiv Dosyasi: %s\n", archive_file);
-        printf("Hedef Dizin: %s\n", target_dir);
-        
-        // TODO: Çıkarma modülünü buraya ekleyeceğiz.
+        // Çıkarma modülünü çağırıyoruz
+        return extract_archive(archive_file, target_dir);
 
     } 
     else {
