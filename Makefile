@@ -1,16 +1,27 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -Iinclude
 
-all: tarsau
+TARGET = tarsau
+# Nesne dosyaları obj klasörüne yönlendirildi
+OBJ = obj/main.o obj/tarsau.o
 
-tarsau: src/main.o lib/archive.o
-	$(CC) $(CFLAGS) -o tarsau src/main.o lib/archive.o
+.PHONY: all clean
 
-src/main.o: src/main.c include/tarsau.h
-	$(CC) $(CFLAGS) -c src/main.c -o src/main.o
+all: obj $(TARGET)
 
-lib/archive.o: lib/archive.c include/tarsau.h
-	$(CC) $(CFLAGS) -c lib/archive.c -o lib/archive.o
+obj:
+	mkdir -p obj
+
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ)
+
+
+obj/main.o: src/main.c include/tarsau.h
+	$(CC) $(CFLAGS) -c src/main.c -o obj/main.o
+
+
+obj/tarsau.o: src/tarsau.c include/tarsau.h
+	$(CC) $(CFLAGS) -c src/tarsau.c -o obj/tarsau.o
 
 clean:
-	rm -f src/*.o lib/*.o tarsau
+	rm -rf obj $(TARGET)
