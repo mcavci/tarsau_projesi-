@@ -37,8 +37,7 @@ int main(int argc, char *argv[]) {
                 file_count++;
             }
         }
-
-        if (file_count == 0) {
+      if (file_count == 0) {
             printf("Hata: Arsivlenecek hic dosya belirtilmedi.\n");
             return 1;
         }

@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -Iinclude
 
 TARGET = tarsau
-# Nesne dosyaları obj klasörüne yönlendirildi
+
 OBJ = obj/main.o obj/tarsau.o
 
 .PHONY: all clean
